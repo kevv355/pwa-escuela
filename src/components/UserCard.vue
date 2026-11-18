@@ -19,12 +19,14 @@ const tareasExistentes = ref([])
 const cargando = ref(false)
 const error = ref('')
 
-// VARIABLES DEL REPRODUCTOR
-const mostrarReproductor = ref(false)
+// VARIABLES DEL BUSCADOR DE MÚSICA JAMENDO
+const mostrarReproductor = ref(true)
+const busquedaMusica = ref('')
+const canciones = ref([])
 const cancion = ref(null)
 const cargandoCancion = ref(false)
 const errorCancion = ref('')
-const ultimaCancion = ref(null)
+const CLIENT_ID = 'TU_CLIENT_ID_DE_JAMENDO'
 
 // GUARDAR AUTOMÁTICAMENTE LAS TAREAS
 watch(tareas, (nuevasTareas) => {
@@ -80,6 +82,7 @@ function guardarEdicion(tarea) {
 
   tarea.titulo = nuevoTitulo
   guardarTareas()
+
   tareaEditando.value = null
   textoEditado.value = ''
 }
@@ -162,6 +165,7 @@ function eliminarTodas() {
   tareas.value = []
   tareaEditando.value = null
   textoEditado.value = ''
+
   guardarTareas()
 }
 
@@ -180,12 +184,10 @@ async function obtenerDatos() {
     }
 
     const datos = await respuesta.json()
+
     tareasExistentes.value = datos
 
     console.table(datos)
-
-    // MOSTRAR REPRODUCTOR
-    mostrarReproductor.value = true
 
   } catch (err) {
     error.value = 'No fue posible recuperar las tareas'
@@ -196,60 +198,61 @@ async function obtenerDatos() {
   }
 }
 
-// CONSULTAR CANCIÓN DESDE AUDIUS API
+// BUSCAR CANCIONES EN JAMENDO
 async function obtenerCancion() {
+  const termino = busquedaMusica.value.trim()
+
+  if (!termino) {
+    errorCancion.value = 'Escribe el nombre de una canción o artista'
+    return
+  }
+
   cargandoCancion.value = true
   errorCancion.value = ''
+  canciones.value = []
+  cancion.value = null
 
   try {
-    // BUSCAR CANCIONES EN AUDIUS
+    // COLOCA AQUÍ TU CLIENT ID DE JAMENDO
+    const CLIENT_ID = '9f77b7b3'
+
+    const parametros = new URLSearchParams({
+      client_id: CLIENT_ID,
+      format: 'json',
+      search: termino,
+      limit: '20',
+      audioformat: 'mp32',
+      imagesize: '200'
+    })
+
     const respuesta = await fetch(
-      'https://api.audius.co/v1/tracks/search?query=pop&limit=30&sort_method=popular'
+      `https://api.jamendo.com/v3.0/tracks/?${parametros}`
     )
 
     if (!respuesta.ok) {
-      throw new Error('Error al consultar Audius')
+      throw new Error('Error al consultar Jamendo')
     }
 
     const datos = await respuesta.json()
 
-    // OBTENER CANCIONES QUE SE PUEDAN REPRODUCIR
-    const cancionesDisponibles = (datos.data || []).filter(
-      item => item.is_streamable === true
-    )
-
-    if (cancionesDisponibles.length === 0) {
-      throw new Error('No se encontraron canciones reproducibles')
+    if (datos.headers.status !== 'success') {
+      throw new Error('No se pudieron obtener las canciones')
     }
 
-    // EVITAR REPETIR LA ÚLTIMA CANCIÓN
-    const opciones = cancionesDisponibles.filter(
-      item => item.id !== ultimaCancion.value
+    canciones.value = (datos.results || []).filter(
+      item => item.audio
     )
 
-    const lista = opciones.length > 0
-      ? opciones
-      : cancionesDisponibles
+    if (canciones.value.length === 0) {
+      errorCancion.value =
+        'No se encontraron canciones. Intenta con otra búsqueda.'
+    }
 
-    // ELEGIR UNA CANCIÓN ALEATORIA
-    const indice = Math.floor(Math.random() * lista.length)
-    const seleccionada = lista[indice]
-
-    // PREPARAR LA URL DE STREAMING
-    seleccionada.streamUrl =
-      `https://api.audius.co/v1/tracks/${seleccionada.id}/stream`
-
-    // GUARDAR LA CANCIÓN
-    cancion.value = seleccionada
-    ultimaCancion.value = seleccionada.id
-
-    console.log('Canción:', seleccionada.title)
-    console.log('Artista:', seleccionada.user?.name)
-    console.log('Audio:', seleccionada.streamUrl)
+    console.log('Canciones encontradas:', canciones.value)
 
   } catch (err) {
     errorCancion.value =
-      'No fue posible obtener una canción. Intenta nuevamente.'
+      'No fue posible buscar música. Intenta nuevamente.'
 
     console.error('Error de música:', err)
 
@@ -258,10 +261,16 @@ async function obtenerCancion() {
   }
 }
 
+// SELECCIONAR CANCIÓN
+function seleccionarCancion(item) {
+  cancion.value = item
+  errorCancion.value = ''
+}
+
 // DETECTAR ERRORES DEL REPRODUCTOR
 function errorReproduccion() {
   errorCancion.value =
-    'No se pudo reproducir esta canción. Intenta consultar otra.'
+    'No se pudo reproducir esta canción. Intenta con otra.'
 }
 </script>
 
@@ -270,6 +279,7 @@ function errorReproduccion() {
 
     <!-- FILTROS -->
     <div class="mb-6 flex gap-2">
+
       <button
         v-for="opcion in [
           { valor: 'todas', texto: 'Todas' },
@@ -288,6 +298,7 @@ function errorReproduccion() {
       >
         {{ opcion.texto }}
       </button>
+
     </div>
 
     <!-- TÍTULO -->
@@ -295,6 +306,7 @@ function errorReproduccion() {
       <h2 class="text-2xl font-bold text-emerald-600">
         Mis tareas
       </h2>
+
       <p class="text-sm text-gray-500">
         ¿Qué haremos hoy?
       </p>
@@ -305,6 +317,7 @@ function errorReproduccion() {
       @submit.prevent="agregarTarea"
       class="mb-5 flex gap-2"
     >
+
       <input
         v-model="nuevaTarea"
         type="text"
@@ -318,6 +331,7 @@ function errorReproduccion() {
       >
         + Agregar
       </button>
+
     </form>
 
     <!-- MENSAJE CUANDO NO HAY TAREAS -->
@@ -336,13 +350,13 @@ function errorReproduccion() {
 
     <!-- LISTA DE TAREAS -->
     <ul class="space-y-3">
+
       <li
         v-for="tarea in tareasFiltradas"
         :key="tarea.id"
         class="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3 transition hover:bg-gray-100"
       >
 
-        <!-- ESTADO -->
         <button
           type="button"
           @click="cambiarEstado(tarea.id)"
@@ -354,6 +368,7 @@ function errorReproduccion() {
           ]"
           :aria-label="tarea.completada ? 'Marcar como pendiente' : 'Marcar como completada'"
         >
+
           <svg
             v-if="tarea.completada"
             xmlns="http://www.w3.org/2000/svg"
@@ -365,9 +380,9 @@ function errorReproduccion() {
           >
             <path d="m5 12 4 4L19 6" />
           </svg>
+
         </button>
 
-        <!-- EDICIÓN -->
         <input
           v-if="tareaEditando === tarea.id"
           v-model="textoEditado"
@@ -378,7 +393,6 @@ function errorReproduccion() {
           autofocus
         />
 
-        <!-- TEXTO -->
         <span
           v-else
           class="min-w-0 flex-1 break-words text-sm"
@@ -389,7 +403,6 @@ function errorReproduccion() {
           {{ tarea.titulo }}
         </span>
 
-        <!-- EDITAR -->
         <button
           v-if="tareaEditando !== tarea.id"
           type="button"
@@ -399,7 +412,6 @@ function errorReproduccion() {
           ✎
         </button>
 
-        <!-- ELIMINAR -->
         <button
           v-if="tareaEditando !== tarea.id"
           type="button"
@@ -409,7 +421,6 @@ function errorReproduccion() {
           X
         </button>
 
-        <!-- GUARDAR -->
         <button
           v-if="tareaEditando === tarea.id"
           type="button"
@@ -419,7 +430,6 @@ function errorReproduccion() {
           ✓
         </button>
 
-        <!-- CANCELAR -->
         <button
           v-if="tareaEditando === tarea.id"
           type="button"
@@ -428,17 +438,23 @@ function errorReproduccion() {
         >
           ✕
         </button>
+
       </li>
+
     </ul>
 
     <!-- CONTADORES -->
     <div class="mt-5 space-y-2 border-t border-gray-200 pt-4">
+
       <p class="text-sm text-gray-500">
         Tareas registradas:
-        <strong class="text-gray-800">{{ tareas.length }}</strong>
+        <strong class="text-gray-800">
+          {{ tareas.length }}
+        </strong>
       </p>
 
       <div class="flex justify-between text-sm">
+
         <p class="text-red-500">
           Pendientes:
           <strong>{{ tareasPendientes }}</strong>
@@ -448,25 +464,33 @@ function errorReproduccion() {
           Completadas:
           <strong>{{ tareasCompletadas }}</strong>
         </p>
+
       </div>
+
     </div>
 
     <!-- TAREAS DE LA API -->
     <div class="mt-6 border-t border-gray-200 pt-4">
+
       <h2 class="mb-3 text-lg font-bold text-gray-800">
         Tareas existentes
       </h2>
 
-      <p v-if="error" class="mb-2 text-sm text-red-500">
+      <p
+        v-if="error"
+        class="mb-2 text-sm text-red-500"
+      >
         {{ error }}
       </p>
 
       <ul class="space-y-2">
+
         <li
           v-for="tarea in tareasExistentes"
           :key="tarea.id"
           class="rounded-lg bg-gray-50 p-2 text-sm text-gray-700"
         >
+
           {{ tarea.title }}
 
           <span
@@ -476,10 +500,15 @@ function errorReproduccion() {
             Completada
           </span>
 
-          <span v-else class="ml-2 text-red-500">
+          <span
+            v-else
+            class="ml-2 text-red-500"
+          >
             Pendiente
           </span>
+
         </li>
+
       </ul>
 
       <!-- CONSULTAR API -->
@@ -501,36 +530,53 @@ function errorReproduccion() {
       >
         Importar tareas de la API
       </button>
+
     </div>
 
-    <!-- REPRODUCTOR DE MÚSICA -->
+    <!-- BUSCADOR DE MÚSICA JAMENDO -->
     <section
       v-if="mostrarReproductor"
       class="mt-6 rounded-xl border border-emerald-100 bg-emerald-50 p-5"
     >
+
       <div class="mb-4 text-center">
+
         <h2 class="text-xl font-bold text-emerald-700">
-          Música aleatoria
+          Buscador de música
         </h2>
 
         <p class="text-sm text-gray-500">
-          Descubre una canción nueva
+          Busca tus canciones favoritas con Jamendo
         </p>
+
       </div>
 
-      <!-- BOTÓN CONSULTAR CANCIÓN -->
-      <button
-        type="button"
-        @click="obtenerCancion"
-        :disabled="cargandoCancion"
-        class="w-full rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 font-semibold text-white shadow-md transition hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50"
+      <!-- CAMPO DE BÚSQUEDA -->
+      <form
+        @submit.prevent="obtenerCancion"
+        class="flex gap-2"
       >
-        {{
-          cargandoCancion
-            ? 'Buscando canción...'
-            : 'Consultar canción'
-        }}
-      </button>
+
+        <input
+          v-model="busquedaMusica"
+          type="text"
+          placeholder="Canción, artista o género..."
+          class="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+        />
+
+        <button
+          type="submit"
+          :disabled="cargandoCancion"
+          class="shrink-0 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 px-4 py-2 font-semibold text-white shadow-md transition hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50"
+        >
+          {{
+            cargandoCancion
+              ? 'Buscando...'
+              : 'Buscar'
+          }}
+        </button>
+
+      </form>
 
       <!-- ERROR DE MÚSICA -->
       <p
@@ -540,54 +586,100 @@ function errorReproduccion() {
         {{ errorCancion }}
       </p>
 
-      <!-- INFORMACIÓN DE CANCIÓN -->
+      <!-- RESULTADOS DE BÚSQUEDA -->
+      <div
+        v-if="canciones.length > 0"
+        class="mt-5 space-y-3"
+      >
+
+        <h3 class="font-bold text-gray-700">
+          Resultados encontrados
+        </h3>
+
+        <div
+          v-for="item in canciones"
+          :key="item.id"
+          class="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
+        >
+
+          <img
+            :src="item.image"
+            :alt="item.name"
+            class="h-14 w-14 shrink-0 rounded-lg object-cover"
+          />
+
+          <div class="min-w-0 flex-1">
+
+            <p class="truncate text-sm font-bold text-gray-800">
+              {{ item.name }}
+            </p>
+
+            <p class="truncate text-xs text-gray-500">
+              {{ item.artist_name }}
+            </p>
+
+            <p class="truncate text-xs text-emerald-600">
+              {{ item.album_name || 'Sencillo' }}
+            </p>
+
+          </div>
+
+          <button
+            type="button"
+            @click="seleccionarCancion(item)"
+            class="shrink-0 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
+            aria-label="Reproducir canción"
+          >
+            ▶
+          </button>
+
+        </div>
+
+      </div>
+
+      <!-- REPRODUCTOR DE LA CANCIÓN SELECCIONADA -->
       <div
         v-if="cancion"
-        class="mt-5 text-center"
+        class="mt-6 rounded-xl border border-emerald-200 bg-white p-4 text-center"
       >
+
         <img
-          v-if="cancion.artwork?._480x480 || cancion.artwork?._150x150"
-          :src="cancion.artwork?._480x480 || cancion.artwork?._150x150"
-          :alt="cancion.title"
-          class="mx-auto mb-4 h-40 w-40 rounded-xl object-cover shadow-md"
+          :src="cancion.image"
+          :alt="cancion.name"
+          class="mx-auto mb-3 h-40 w-40 rounded-xl object-cover shadow-md"
         />
 
         <h3 class="font-bold text-gray-800">
-          {{ cancion.title }}
+          {{ cancion.name }}
         </h3>
 
-        <p class="mt-1 text-sm text-gray-600">
-          {{ cancion.user?.name || 'Artista desconocido' }}
+        <p class="mt-1 text-sm text-gray-500">
+          {{ cancion.artist_name }}
         </p>
 
-        <p class="mt-1 text-xs text-gray-400">
-          {{ cancion.genre || 'Música' }}
-        </p>
-
-        <!-- REPRODUCTOR DE AUDIO -->
         <audio
           :key="cancion.id"
           controls
+          autoplay
           preload="none"
-          :src="cancion.streamUrl"
+          :src="cancion.audio"
           class="mt-4 w-full"
           @error="errorReproduccion"
         >
           Tu navegador no soporta audio.
         </audio>
 
-        <!-- ENLACE A AUDIUS -->
         <a
-          :href="cancion.permalink?.startsWith('http')
-            ? cancion.permalink
-            : 'https://audius.co' + cancion.permalink"
+          :href="cancion.shareurl"
           target="_blank"
           rel="noopener noreferrer"
           class="mt-3 inline-block text-sm font-semibold text-emerald-700 hover:underline"
         >
-          Ver canción en Audius
+          Ver canción en Jamendo
         </a>
+
       </div>
+
     </section>
 
     <!-- BORRAR TODAS -->
